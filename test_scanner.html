@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline QR Ticket Verifier</title>
+    <!-- Include the open-source QR Code reader library (works entirely offline once loaded) -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
+
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --warning: #ca8a04;
+            --dark: #1f2937;
+            --light: #f3f4f6;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background-color: var(--light);
+            color: var(--dark);
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        h2 { text-align: center; margin-bottom: 8px; }
+        .card {
+            background: white;
+            padding: 16px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 16px;
+        }
+        button {
+            width: 100%;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        button:active { opacity: 0.9; }
+        #reader {
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+        #result-box {
+            display: none;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+            margin-top: 12px;
+            animation: fadeIn 0.3s ease;
+        }
+        .status-success { background-color: #dcfce7; color: var(--success); border: 2px solid var(--success); }
+        .status-danger { background-color: #fee2e2; color: var(--danger); border: 2px solid var(--danger); }
+        .status-warning { background-color: #fef9c3; color: var(--warning); border: 2px solid var(--warning); }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            text-align: center;
+            margin-top: 8px;
+        }
+        .stat-val { font-size: 20px; font-weight: bold; color: var(--primary); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>??? Offline Ticket Scanner</h2>
+    
+    <!-- Step 1: Initialize Database Simulated Action -->
+    <div class="card">
+        <h3>1. Database Setup</h3>
+        <p style="font-size: 14px; color: #666; margin-top:-8px;">Simulate fetching a master list while online.</p>
+        <button onclick="seedDatabase()">Load Sample Guest List (5 Tickets)</button>
+        <div class="stats-grid">
+            <div><div>Total Registered</div><div id="stat-total" class="stat-val">0</div></div>
+            <div><div>Checked In</div><div id="stat-checked" class="stat-val">0</div></div>
+        </div>
+    </div>
+
+    <!-- Step 2: The Camera Scanner Layout -->
+    <div class="card">
+        <h3>2. Scanner</h3>
+        <div id="reader"></div>
+        <div id="result-box"></div>
+    </div>
+</div>
+
+<script>
+    let html5QrcodeScanner;
+
+    // 1. Seed dummy data into localStorage to simulate an API pull while online
+    function seedDatabase() {
+        const sampleGuests = {
+            "TICKET-001": { name: "Alice Smith", status: "pending", time: null },
+            "TICKET-002": { name: "Bob Jones", status: "pending", time: null },
+            "TICKET-003": { name: "Charlie Brown", status: "pending", time: null },
+            "TICKET-004": { name: "Diana Prince", status: "pending", time: null },
+            "TICKET-005": { name: "Evan Wright", status: "pending", time: null }
+        };
+        
+        localStorage.setItem('event_guests', JSON.stringify(sampleGuests));
+        updateStats();
+        alert("Success! 5 sample tickets loaded into LocalStorage. (IDs: TICKET-001 through TICKET-005)");
+    }
+
+    // 2. Read and display standard counts from localStorage
+    function updateStats() {
+        const guests = JSON.parse(localStorage.getItem('event_guests')) || {};
+        const total = Object.keys(guests).length;
+        const checkedIn = Object.values(guests).filter(g => g.status === 'checked_in').length;
+        
+        document.getElementById('stat-total').innerText = total;
+        document.getElementById('stat-checked').innerText = checkedIn;
+    }
+
+    // 3. Central verification logic called every time a QR string is decoded
+    function verifyTicket(scannedText) {
+        const resultBox = document.getElementById('result-box');
+        resultBox.style.display = "block";
+        
+        const guests = JSON.parse(localStorage.getItem('event_guests')) || {};
+        const cleanKey = scannedText.trim(); // Ensure white space doesn't break matching
+
+        // Scenario A: Ticket string does not exist in local storage list
+        if (!guests[cleanKey]) {
+            resultBox.className = "status-danger";
+            resultBox.innerHTML = `? INVALID TICKET<br><span style="font-size:14px; font-weight:normal;">Code: ${cleanKey} not found!</span>`;
+            return;
+        }
+
+        const ticket = guests[cleanKey];
+
+        // Scenario B: Ticket exists but has already been checked in (Fraud prevention)
+        if (ticket.status === "checked_in") {
+            resultBox.className = "status-warning";
+            resultBox.innerHTML = `?? ALREADY CHECKED IN<br><span style="font-size:15px;">${ticket.name} entered at ${ticket.time}</span>`;
+            return;
+        }
+
+        // Scenario C: Valid ticket found and status updated safely
+        ticket.status = "checked_in";
+        ticket.time = new Date().toLocaleTimeString();
+        
+        // Write state updates instantly back to database
+        guests[cleanKey] = ticket;
+        localStorage.setItem('event_guests', JSON.stringify(guests));
+        
+        resultBox.className = "status-success";
+        resultBox.innerHTML = `? ACCESS GRANTED<br><span style="font-size:16px;">Welcome, ${ticket.name}!</span>`;
+        
+        updateStats();
+    }
+
+    // 4. Initialize and run scanner layout on window load
+    window.addEventListener('DOMContentLoaded', () => {
+        updateStats();
+        
+        // Configuration options for html5-qrcode library
+        html5QrcodeScanner = new Html5QrcodeScanner("reader", { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 },
+            rememberLastUsedCamera: true,
+            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+        });
+        
+        // Start processing loops
+        html5QrcodeScanner.render(
+            (decodedText) => {
+                // Triggered instantly on successful scan
+                verifyTicket(decodedText);
+            }, 
+            (error) => {
+                // Verbose frame-by-frame exceptions silences to avoid UI lag
+            }
+        );
+    });
+</script>
+
+</body>
+</html>
